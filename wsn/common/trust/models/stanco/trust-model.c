@@ -6,6 +6,8 @@
 #include "keystore.h"
 #include <stdio.h>
 #include "os/sys/log.h"
+#include "rpl-icmp6.h"
+#include "rpl-neighbor.h"
 /*-------------------------------------------------------------------------------------------------------------------*/
 #define LOG_MODULE "trust-comm"
 #ifdef TRUST_MODEL_LOG_LEVEL
@@ -18,8 +20,6 @@ void edge_resource_tm_init(edge_resource_tm_t* tm)
 {
     beta_dist_init(&tm->task_submission, 1, 1);
     beta_dist_init(&tm->task_result, 1, 1);
-
-    tm->last_ping_response = 0;
 }
 /*-------------------------------------------------------------------------------------------------------------------*/
 void edge_resource_tm_print(const edge_resource_tm_t* tm)
@@ -35,8 +35,6 @@ void edge_resource_tm_print(const edge_resource_tm_t* tm)
 void edge_capability_tm_init(edge_capability_tm_t* tm)
 {
     beta_dist_init(&tm->result_quality, 1, 1);
-    gaussian_dist_init_empty(&tm->throughput_in);
-    gaussian_dist_init_empty(&tm->throughput_out);
 }
 /*-------------------------------------------------------------------------------------------------------------------*/
 void edge_capability_tm_print(const edge_capability_tm_t* tm)
@@ -44,10 +42,6 @@ void edge_capability_tm_print(const edge_capability_tm_t* tm)
     printf("EdgeCapTM(");
     printf("ResQual=");
     dist_print(&tm->result_quality);
-    printf(",ThroughputIn=");
-    dist_print(&tm->throughput_in);
-    printf(",ThroughputOut=");
-    dist_print(&tm->throughput_out);
     printf(")");
 }
 /*-------------------------------------------------------------------------------------------------------------------*/
@@ -61,52 +55,13 @@ void peer_tm_print(const peer_tm_t* tm)
     printf(")");
 }
 /*-------------------------------------------------------------------------------------------------------------------*/
-static float goodness_of_throughput(const edge_capability_t* capability)
-{
-    const gaussian_dist_t* in = &capability->tm.throughput_in;
-    const gaussian_dist_t* out = &capability->tm.throughput_out;
-
-    const trust_throughput_threshold_t* info = trust_throughput_thresholds_find(capability->name);
-    ASSERT(info != NULL);
-
-    if (in->count == 0 && out->count == 0)
-    {
-        // No values, so just return the best
-        return 1;
-    }
-    else if (in->count == 0 && out->count > 0)
-    {
-        if (out->mean < info->out_threshold)
-        {
-            return 0;
-        }
-        else
-        {
-            return 1;
-        }
-        
-    }
-    else
-    {
-        // How good is both incoming and outgoing throughput
-        if (in->mean >= info->in_threshold && out->mean >= info->out_threshold)
-        {
-            return 1;
-        }
-        else if (in->mean < info->in_threshold && out->mean > ((info->out_threshold/info->in_threshold)*in->mean) )
-        {
-            return (in->mean)/info->in_threshold;
-        }
-        else
-        {
-            return (out->mean)/info->out_threshold;
-        }
-        
-    }
-}
-/*-------------------------------------------------------------------------------------------------------------------*/
 float calculate_trust_value(edge_resource_t* edge, edge_capability_t* capability)
 {
+    //uip_addr_t* ipaddr = &edge->ep.ipaddr;
+    //const linkaddrt *lladdr2
+    //link_stats_from_lladdr();
+    rpl_neighbor_print_list("Let's print something");
+
     // Get the stereotype that may inform the trust value
     edge_stereotype_t* s = NULL;
     public_key_item_t* item = keystore_find_addr(&edge->ep.ipaddr);
@@ -135,11 +90,6 @@ float calculate_trust_value(edge_resource_t* edge, edge_capability_t* capability
 
     w = find_trust_weight(capability->name, TRUST_METRIC_RESULT_QUALITY);
     e = beta_dist_expected(&capability->tm.result_quality);
-    trust += w * e;
-    w_total += w;
-
-    w = find_trust_weight(capability->name, TRUST_METRIC_THROUGHPUT);
-    e = goodness_of_throughput(capability);
     trust += w * e;
     w_total += w;
 
@@ -231,60 +181,6 @@ void tm_update_result_quality(edge_resource_t* edge, edge_capability_t* cap, con
     LOG_INFO_("\n");
 }
 /*-------------------------------------------------------------------------------------------------------------------*/
-void tm_update_task_throughput(edge_resource_t* edge, edge_capability_t* cap, const tm_throughput_info_t* info)
-{
-    if (info->direction == TM_THROUGHPUT_IN)
-    {
-        LOG_INFO("Updating Edge %s capability %s TM throughput in (%" PRIu32 " bytes/tick): ",
-        edge_info_name(edge), cap->name, info->throughput);
-        gaussian_dist_print(&cap->tm.throughput_in);
-        LOG_INFO_(" -> ");
-
-        gaussian_dist_update(&cap->tm.throughput_in, info->throughput);
-
-        gaussian_dist_print(&cap->tm.throughput_in);
-        LOG_INFO_("\n");
-    }
-    else if (info->direction == TM_THROUGHPUT_OUT)
-    {
-        LOG_INFO("Updating Edge %s capability %s TM throughput out (%" PRIu32 " bytes/tick): ",
-        edge_info_name(edge), cap->name, info->throughput);
-        gaussian_dist_print(&cap->tm.throughput_out);
-        LOG_INFO_(" -> ");
-
-        gaussian_dist_update(&cap->tm.throughput_out, info->throughput);
-
-        gaussian_dist_print(&cap->tm.throughput_out);
-        LOG_INFO_("\n");
-    }
-    else
-    {
-        LOG_ERR("Unknown throughput direction\n");
-    }
-}
-/*-------------------------------------------------------------------------------------------------------------------*/
-void tm_update_ping(edge_resource_t* edge, const tm_edge_ping_t* info)
-{
-    if (info->action == TM_PING_SENT)
-    {
-        // Do nothing
-    }
-    else if (info->action == TM_PING_RECEIVED)
-    {
-        LOG_INFO("Updating Edge %s TM last ping: %" PRIu32,
-        edge_info_name(edge), edge->tm.last_ping_response);
-        LOG_INFO_(" -> ");
-
-        edge->tm.last_ping_response = clock_time();
-
-        LOG_INFO_("%" PRIu32 "\n", edge->tm.last_ping_response);
-    }
-    else
-    {
-        LOG_ERR("Unknown ping action\n");
-    }
-}
-/*-------------------------------------------------------------------------------------------------------------------*/
 #ifdef APPLICATION_CHALLENGE_RESPONSE
 void tm_update_challenge_response(edge_resource_t* edge, const tm_challenge_response_info_t* info)
 {
@@ -319,10 +215,8 @@ int serialise_trust_edge_resource(nanocbor_encoder_t* enc, const edge_resource_t
 /*-------------------------------------------------------------------------------------------------------------------*/
 int serialise_trust_edge_capability(nanocbor_encoder_t* enc, const edge_capability_tm_t* cap)
 {
-    NANOCBOR_CHECK(nanocbor_fmt_array(enc, 3));
+    NANOCBOR_CHECK(nanocbor_fmt_array(enc, 1));
     NANOCBOR_CHECK(dist_serialise(enc, &cap->result_quality));
-    NANOCBOR_CHECK(dist_serialise(enc, &cap->throughput_in));
-    NANOCBOR_CHECK(dist_serialise(enc, &cap->throughput_out));
 
     return NANOCBOR_OK;
 }
@@ -349,8 +243,6 @@ int deserialise_trust_edge_capability(nanocbor_value_t* dec, edge_capability_tm_
     nanocbor_value_t arr;
     NANOCBOR_CHECK(nanocbor_enter_array(dec, &arr));
     NANOCBOR_CHECK(dist_deserialise(&arr, &cap->result_quality));
-    NANOCBOR_CHECK(dist_deserialise(&arr, &cap->throughput_in));
-    NANOCBOR_CHECK(dist_deserialise(&arr, &cap->throughput_out));
 
     if (!nanocbor_at_end(&arr))
     {
@@ -360,5 +252,50 @@ int deserialise_trust_edge_capability(nanocbor_value_t* dec, edge_capability_tm_
     nanocbor_leave_container(dec, &arr);
 
     return NANOCBOR_OK;
+}
+/*-------------------------------------------------------------------------------------------------------------------*/
+void tm_process_dio(uip_ipaddr_t *from, rpl_dio_t *dio)
+{
+    LOG_INFO("Got DIO\n");
+    LOG_INFO("from "); LOG_INFO_6ADDR(from); LOG_INFO_("\n");
+    LOG_INFO("dag_id "); LOG_INFO_6ADDR(&dio->dag_id); LOG_INFO_("\n");
+    LOG_INFO("ocp %" PRIu16 "\n", dio->ocp);
+    LOG_INFO("rank %" PRIu16 "\n", dio->rank);
+    LOG_INFO("grounded %" PRIu8 "\n", dio->grounded);
+    LOG_INFO("mop %" PRIu8 "\n", dio->mop);
+    LOG_INFO("preference %" PRIu8 "\n", dio->preference);
+    LOG_INFO("version %" PRIu8 "\n", dio->version);
+    LOG_INFO("instance_id %" PRIu8 "\n", dio->instance_id);
+    LOG_INFO("dtsn %" PRIu8 "\n", dio->dtsn);
+    LOG_INFO("dag_intdoubl %" PRIu8 "\n", dio->dag_intdoubl);
+    LOG_INFO("dag_intmin %" PRIu8 "\n", dio->dag_intmin);
+    LOG_INFO("dag_redund %" PRIu8 "\n", dio->dag_redund);
+    LOG_INFO("default_lifetime %" PRIu8 "\n", dio->default_lifetime);
+    LOG_INFO("lifetime_unit %" PRIu16 "\n", dio->lifetime_unit);
+    LOG_INFO("dag_max_rankinc %" PRIu16 "\n", dio->dag_max_rankinc);
+    LOG_INFO("dag_min_hoprankinc %" PRIu16 "\n", dio->dag_min_hoprankinc);
+    LOG_INFO("destination_prefix.prefix "); LOG_INFO_6ADDR(&dio->destination_prefix.prefix); LOG_INFO_("\n");
+    LOG_INFO("destination_prefix.lifetime %" PRIu32 "\n", dio->destination_prefix.lifetime);
+    LOG_INFO("destination_prefix.length %" PRIu8 "\n", dio->destination_prefix.length);
+    LOG_INFO("destination_prefix.flags %" PRIu8 "\n", dio->destination_prefix.flags);
+    LOG_INFO("prefix_info.prefix "); LOG_INFO_6ADDR(&dio->prefix_info.prefix); LOG_INFO_("\n");
+    LOG_INFO("prefix_info.lifetime %" PRIu32 "\n", dio->prefix_info.lifetime);
+    LOG_INFO("prefix_info.length %" PRIu8 "\n", dio->prefix_info.length);
+    LOG_INFO("prefix_info.flags %" PRIu8 "\n", dio->prefix_info.flags);
+    LOG_INFO("dio.mc.type %" PRIu8 "\n", dio->mc.type);
+    LOG_INFO("dio.mc.flags %" PRIu8 "\n", dio->mc.flags);
+    LOG_INFO("dio.mc.aggr %" PRIu8 "\n", dio->mc.aggr);
+    LOG_INFO("dio.mc.prec %" PRIu8 "\n", dio->mc.prec);
+    LOG_INFO("dio.mc.length %" PRIu8 "\n", dio->mc.length);
+    LOG_INFO("dio.mc.obj.etx %" PRIu16 "\n", dio->mc.obj.etx);
+    LOG_INFO("dio.mc.obj.energy.flags %" PRIu8 "\n", dio->mc.obj.energy.flags);
+    LOG_INFO("dio.mc.obj.energy.energy_est %" PRIu8 "\n", dio->mc.obj.energy.energy_est);
+}
+/*-------------------------------------------------------------------------------------------------------------------*/
+
+void tm_process_dis(uip_ipaddr_t *from, int is_multicast)
+{
+    LOG_INFO("Got DIS\n");
+    LOG_INFO("from "); LOG_INFO_6ADDR(from); LOG_INFO_("\n");
 }
 /*-------------------------------------------------------------------------------------------------------------------*/
