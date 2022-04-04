@@ -100,7 +100,14 @@ class KeystoreAddResult(Enum):
 
 class ChallengeResponseAnalyser:
     RE_TRUST_UPDATING_CR = re.compile(r'Updating Edge ([0-9A-Za-z]+) TM cr \(type=([0-9]),good=([01])\): EdgeResourceTM\(epoch=([0-9]+),(blacklisted|bad)=([01])\) -> EdgeResourceTM\(epoch=([0-9]+),(blacklisted|bad)=([01])\)')
-    #RE_TRUST_UPDATING = re.compile(r'Updating Edge ([0-9A-Za-z]+) capability ([0-9A-Za-z]+) TM ([0-9A-Za-z_]+) \((.*)\)\)')
+
+    RE_TRUST_UPDATING_THROUGHPUT = re.compile(r'Updating Edge ([0-9A-Za-z]+) capability ([A-Za-z]+) TM throughput ([A-Za-z]+) \(([0-9]+) bytes/tick\): N\(mean=([0-9\.]+),var=([0-9\.]+),n=([0-9]+)\) -> N\(mean=([0-9\.]+),var=([0-9\.]+),n=([0-9]+)\)')
+    RE_TRUST_UPDATING_LAST_PING = re.compile(r'Updating Edge ([0-9A-Za-z]+) TM last ping: ([0-9])+ -> ([0-9])')
+    RE_TRUST_UPDATING_BAD_PING = re.compile(r'Setting trust value to 0 as we haven\'t received a ping recently \(time since last ping = ([0-9]+) sec')
+    RE_TRUST_UPDATING_TASK_SUBMISSION = re.compile(r'Updating Edge ([0-9A-Za-z]+) capability ([0-9A-Za-z]+) TM task_submission \(req=([0-9]+), coap=([0-9]+)\): Beta\(alpha=([0-9]+),beta=([0-9]+)\) -> Beta\(alpha=([0-9]+),beta=([0-9]+)\)')
+    RE_TRUST_UPDATING_TASK_RESULT = re.compile(r'Updating Edge ([0-9A-Za-z]+) capability ([0-9A-Za-z]+) TM task_result \(result=([0-9]+)\): Beta\(alpha=([0-9]+),beta=([0-9]+)\) -> Beta\(alpha=([0-9]+),beta=([0-9]+)\)')
+    RE_TRUST_UPDATING_RESULT_QUALITY = re.compile(r'Updating Edge ([0-9A-Za-z]+) capability ([0-9A-Za-z]+) TM result_quality \(good=([0-9]+)\): Beta\(alpha=([0-9]+),beta=([0-9]+)\) -> Beta\(alpha=([0-9]+),beta=([0-9]+)\)')
+
 
     RE_ROUTING_GENERATED = re.compile(r'Generated message \(len=([0-9]+)\) for path from \(([0-9.-]+),([0-9.-]+)\) to \(([0-9.-]+),([0-9.-]+)\)')
     RE_MONITORING_GENERATED = re.compile(r'Generated message \(len=([0-9]+)\)')
@@ -167,6 +174,16 @@ class ChallengeResponseAnalyser:
                 if line.startswith("Updating Edge"):
                     if "TM cr" in line:
                         self._process_updating_edge_cr(time, log_level, module, line)
+                    elif "TM throughput" in line:
+                        self._process_updating_edge_throughput(time, log_level, module, line)
+                    # elif "TM last ping" in line:
+                    #     self._process_updating_edge_last_ping(time, log_level, module, line)
+                    # elif "TM task_submission" in line:
+                    #     self._process_updating_edge_task_submission(time, log_level, module, line)
+                    # elif "TM task_result" in line:
+                    #     self._process_updating_edge_task_result(time, log_level, module, line)
+                    # elif "TM result_quality" in line:
+                    #     self._process_updating_edge_result_quality(time, log_level, module, line)
                     else:
                         # Other trust model
                         pass
@@ -317,6 +334,7 @@ class ChallengeResponseAnalyser:
             #print((time, module, line))
 
     def _process_updating_edge_cr(self, time, log_level, module, line):
+        # print(line)
         m = self.RE_TRUST_UPDATING_CR.match(line)
         if m is None:
             raise RuntimeError(f"Failed to parse '{line}'")
@@ -337,6 +355,74 @@ class ChallengeResponseAnalyser:
         u = TrustModelUpdate(time, m_edge_id, cr, tm_from, tm_to)
 
         self.tm_updates.append(u)
+
+    def _process_updating_edge_throughput(self, time, log_level, module, line):
+        # print(line)
+        m = self.RE_TRUST_UPDATING_THROUGHPUT.match(line)
+        if m is None:
+            raise RuntimeError(f"Failed to parse '{line}'")
+        m_edge_id = m.group(1)  #e.g. f4ce36b29cb59ade
+        m_capability_type = m.group(2) #e.g. envmon
+        m_direction = m.group(3) #e.g. out
+        m_throughput = m.group(4) #e.g.
+        m_previous_mean = m.group(5) #e.g. 42.437496
+        m_previous_var = m.group(6) #e.g. 425.286224
+        m_previous_number = m.group(7) #e.g. 32
+        m_current_mean = m.group(8) #e.g. 43.242420
+        m_current_var = m.group(9) #e.g. 433.376831
+        m_current_number = m.group(10) #e.g. 33
+
+    def _process_updating_edge_last_ping(self, time, log_level, module, line):
+        m = self.RE_TRUST_UPDATING_LAST_PING.match(line)
+        if m is None:
+            raise RuntimeError(f"Failed to parse '{line}'")
+        m_edge_id = m.group(1)  #e.g. f4ce36b29cb59ade
+        m_previous_ping = m.group(2) #e.g. 272676
+        m_current_ping = m.group(3) #e.g. 275228
+
+    def _process_updating_edge_bad_ping(self, time, log_level, module, line):
+        m = self.RE_TRUST_UPDATING_BAD_PING.match(line)
+        if m is None:
+            raise RuntimeError(f"Failed to parse '{line}'")
+        m_last_ping = m.group(1)  #e.g. 18
+
+    def _process_updating_edge_task_submission(self, time, log_level, module, line):
+        m = self.RE_TRUST_UPDATING_TASK_SUBMISSION.match(line)
+        if m is None:
+            raise RuntimeError(f"Failed to parse '{line}'")
+        m_edge_id = m.group(1)  #e.g. f4ce36b29cb59ade
+        m_capability_type = m.group(2) #e.g. envmon
+        m_req = m.group(3) #e.g. 0
+        m_coap = m.group(4) #e.g. 69
+        m_previous_alpha = m.group(5) #e.g. 7
+        m_previous_beta = m.group(6) #e.g. 1
+        m_current_alpha = m.group(7) #e.g. 8
+        m_current_beta = m.group(8) #e.g. 1
+
+    def _process_updating_edge_task_result(self, time, log_level, module, line):
+        m = self.RE_TRUST_UPDATING_TASK_RESULT.match(line)
+        if m is None:
+            raise RuntimeError(f"Failed to parse '{line}'")
+        m_edge_id = m.group(1)  #e.g. f4ce36b29cb59ade
+        m_capability_type = m.group(2) #e.g. envmon
+        m_result = m.group(3) #e.g. 0
+        m_previous_alpha = m.group(4) #e.g. 7
+        m_previous_beta = m.group(5) #e.g. 1
+        m_current_alpha = m.group(6) #e.g. 8
+        m_current_beta = m.group(7) #e.g. 1
+
+    def _process_updating_edge_result_quality(self, time, log_level, module, line):
+        m = self.RE_TRUST_UPDATING_RESULT_QUALITY.match(line)
+        if m is None:
+            raise RuntimeError(f"Failed to parse '{line}'")
+        m_edge_id = m.group(1)  #e.g. f4ce36b29cb59ade
+        m_capability_type = m.group(2) #e.g. envmon
+        m_result_quality = m.group(3) #e.g. 1
+        m_previous_alpha = m.group(4) #e.g. 7
+        m_previous_beta = m.group(5) #e.g. 1
+        m_current_alpha = m.group(6) #e.g. 8
+        m_current_beta = m.group(7) #e.g. 1
+
 
 
 def main(log_dir: pathlib.Path):
