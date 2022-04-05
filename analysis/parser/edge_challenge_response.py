@@ -32,7 +32,12 @@ class ChallengeResponse:
 
 class ChallengeResponseAnalyser:
     RE_RECEIVE_CHALLENGE = re.compile(r"Received challenge at (.+) from (.+) <difficulty=([0-9]+), data=(b[\"'].+[\"'])>")
-    RE_CHALLENGE_RESPONSE = re.compile(r"Job \(IPv6Address\('(.+)'\), ([0-9]+), (b[\"'].+[\"']), ([0-9]+)\) took ([0-9\.]+) seconds and ([0-9]+) iterations and found prefix (b[\"'].+[\"'])")
+    # RE_CHALLENGE_RESPONSE = re.compile(r"Job \(IPv6Address\('(.+)'\), ([0-9]+), (b[\"'].+[\"']), ([0-9]+)\) took ([0-9\.]+) seconds and ([0-9]+) iterations and found prefix (b[\"'].+[\"'])")
+
+    RE_CHALLENGE_RESPONSE = re.compile(r'Job \(IPv6Address\(\'(.+)\'\), .+, \[([0-9+]), (b\".+\"), .+')
+    #Job (IPv6Address('fd00::f6ce:36fe:6c65:c773'), datetime.datetime(2022, 3, 30, 15, 47, 42, 370381, tzinfo=datetime.timezone.utc), [2, b"\xe2\xb7\xa7\xa1Y\xef\xedf'\xb7\x84\xd7v@\xe7Oh\x15P\xe8\xb7-\xd0\x91\xf9\x01\xa2I\x9e\xfe\x84\x8e", 40]) took 0.09191532500062749 seconds and 9313 iterations and found prefix b'$a'
+
+
     RE_BECOMING = re.compile(r"Becoming (good|bad)")
     RE_CURRENTLY = re.compile(r"Currently (good|bad), so behaving (correctly|incorrectly with ([A-Za-z-]+))")
 
@@ -91,14 +96,16 @@ class ChallengeResponseAnalyser:
 
     def _process_job_complete(self, time: datetime, level: str, app: str, line: str):
         m = self.RE_CHALLENGE_RESPONSE.match(line)
+        # if m is None:
+        #     raise RuntimeError(f"Failed to parse '{line}'")
         m_from = ipaddress.ip_address(m.group(1))
         m_difficulty = int(m.group(2))
         m_data = ast.literal_eval(m.group(3))
 
-        m_max_duration = int(m.group(4))
-        m_duration = float(m.group(5))
-        m_iterations = int(m.group(6))
-        m_prefix = ast.literal_eval(m.group(7))
+        # m_max_duration = int(m.group(4))
+        # m_duration = float(m.group(5))
+        # m_iterations = int(m.group(6))
+        # m_prefix = ast.literal_eval(m.group(7))
 
         c = Challenge(m_from, m_difficulty, m_data)
         r = Response(m_max_duration, m_duration, m_iterations, m_prefix)
